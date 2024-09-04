@@ -66,6 +66,8 @@ def main():
 
 	parser.add_option("-l","--scale",dest="scale",default=False,help="If set, scales the specified columns by the specified amount. First argument is what to scale by, second argument is all specified columns in Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars",nargs=2,action="store")
 
+	parser.add_option("-C","--columns",dest="all_columns",default=False,help="If set, prints the labels for all columns",action="store_true")
+
 	(options,args)=parser.parse_args()
 	file = options.file
 	file2=options.file2
@@ -88,6 +90,7 @@ def main():
 	print_all=options.print_all
 	double=options.double
 	scale=options.scale
+	all_columns=options.all_columns
 
 	#parse constraint inputs
 	constraints=args #positional arguments:  (column labels, relationship, target values). Column labels and relationships.accepted relationships are =, <, >, >=, <=, !=
@@ -117,6 +120,9 @@ def main():
 			raise Exception("File 2 type unsupported")
 
 		data=pd.concat([data,data2],ignore_index=True)
+
+	if all_columns:
+		[print(label) for label in labels]
 
 	#fill in x,y,z if undeclared
 	if not x_label:
@@ -498,6 +504,8 @@ def compare_columns(target_col,x_label,y_label):
 	pairs=[]
 	counts={}
 	x_float=True
+	# print(target_col)
+	# print(target_col[y_label].dtypes)
 	if target_col[x_label].dtypes == "object":
 		x_float=False
 	y_float=True
@@ -526,8 +534,13 @@ def compare_columns(target_col,x_label,y_label):
 
 	print()
 	print("Out of a total of", len(target_col),"datapoints")
+	count=0
 	for pair in pairs:
 		print("There are",counts[tuple(pair)],"datapoints where",x_label,"is",pair[0],"and",y_label,"is",pair[1])
+		if counts[tuple(pair)] > 1:
+		 	count=count+counts[tuple(pair)]-1
+	print()
+	print("Number of redundant rows:",count)
 	print()
 
 def print_cols(print_all,everything_but,labels):
@@ -555,6 +568,7 @@ def print_cols(print_all,everything_but,labels):
 			add_index=add_index+1
 	printing_data = everything_but.loc[:, labels2print]
 	print(labels2print)
+	print(len(printing_data))
 	# for column in labels2print:
 	# 	print()
 	# 	print(column)
