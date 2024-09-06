@@ -8,6 +8,34 @@ Helper functions for quantum chemistry
 python3 compatible
 '''
 
+def get_final_serial_geom(file):
+    '''
+    Extracts the final input geometry from the output of a series of serial qchem single points
+    Inputs:
+        file -- .out file with optimization
+    Outputs: 
+        xyz_coords -- np array with the coordinates of all the atoms (float, NAtoms x 3). Indexed the same as atom_names
+        atom_names -- np array with the atom names (str, NAtoms)
+    '''
+
+    with open(file,'r') as out:
+
+        all_lines=out.readlines()
+        lines=[]
+        for i in reversed(range(len(all_lines))):
+            if all_lines[i].find("$molecule")!=-1:
+                pos1=i
+                break
+        for i in range(pos1+2,len(all_lines)):
+            if all_lines[i].find("$end")!=-1:
+                break
+            else:
+                lines.append(all_lines[i].strip().split())
+        lines=np.array(lines)
+        atom_names=lines[:,0]
+        xyz_coords=lines[:,1:].astype(float)
+        return atom_names, xyz_coords
+
 def get_all_alpha(atoms,nbas,mo_mat,orb_per_atom):
     '''
     computes alpha, the sum of all squared MO coefficients from a set of basis functions in a given MO, for each atom

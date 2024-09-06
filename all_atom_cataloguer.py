@@ -478,7 +478,7 @@ def catalogue_all_atoms(atoms,ind_lig,ind_cat,ind_P,alpha_cat,ipr,orbs_by_atoms,
 	tetrahedral_errors=[]
 	seesaw_errors=[]
 	n_lig=[]
-
+	print(occ_min)
 	for i,atom in enumerate(atoms):
 		if not ind_lig[i]:
 			chosen_atoms.append(i)
@@ -506,7 +506,8 @@ def catalogue_all_atoms(atoms,ind_lig,ind_cat,ind_P,alpha_cat,ipr,orbs_by_atoms,
 					state_found=True
 					chosen_states.append(mo_i)
 					#print(mo_i,orb)
-				orb=orb+1
+				else:
+					orb=orb+1
 
 			#label state
 			if (ind_cat[i] and orb>=vir_max) or (ind_P[i] and orb>=occ_min):
