@@ -8,6 +8,105 @@ from matplotlib import pyplot as plt
 from collections import Counter
 import random
 
+def match_cutout(atoms,large_coords,cutout_atoms,cutout_coords,round_to=3):
+    '''
+    given a large xyz and a smaller xyz that represents a cutout of that larger xyz 
+    (with preserved bond angles and relative but not absolute bond angles)
+    find the atoms in the larger .xyz that match the smaller .xyz and puts them in matching order
+    the center of the cutout is the atom with the highest coordination number, all bond lengths&angles are relative to it
+
+    Inputs:
+        atoms: a np array of elements (strs) in the larger .xyz
+        large_coords: np array of cartesian coordinates in the larger .xyz
+        cutout_atoms: np array of elements (strs) in the smaller .xyz
+        cutout_coords: np array of cartesian coordinates in the smaller .xyz
+        round_to: a parameter determining how much to round the angles before comparing. defaults to 3
+    Outputs:
+        matched_coords: np array of cartesian coordinates from the larger .xyz that match the cutout, sorted by bond length
+        matched_atoms: np array of elements (strs) from the larger .xyz that match the cutout, sorted by bond length
+        sorted_cutout_coords: np array of cartesian coordinates in the smaller .xyz, sorted by bond length
+        sorted_cutout_atoms: np array of elements (strs) in the smaller .xyz, sorted by bond length
+        coordinate_center: len 3 np array of cartesian coordinates for the center of the cutout in the big xyz before they have been re-centered
+    '''
+
+    idists=dist_all_points(cutout_coords)
+    iconnect=smart_connectivity_finder(idists,cutout_atoms)
+    iangles=get_close_angles(cutout_coords,idists,iconnect)
+
+    #identify center in cutout .xyz
+    coord_ns=np.array([len(iconnect[x]) for x in range(len(cutout_atoms))])
+    cutout_center=np.argmax(coord_ns)
+
+    center_angles=angles_on_center(iangles,cutout_center,rounded=round_to)
+
+    #sort cutout
+    sorted_cutout_coords=np.array([x for _,x in sorted(zip(np.delete(idists[cutout_center],cutout_center,0),np.delete(cutout_coords,cutout_center,0)))])
+    sorted_cutout_coords=np.vstack([cutout_coords[cutout_center],sorted_cutout_coords])
+    sorted_cutout_atoms=np.array([x for _,x in sorted(zip(np.delete(idists[cutout_center],cutout_center,0),np.delete(cutout_atoms,cutout_center)))])
+    sorted_cutout_atoms=np.concatenate([[cutout_atoms[cutout_center]],sorted_cutout_atoms])
+
+    #compute metrics for big xyz
+    dists=dist_all_points(large_coords)
+    connect=smart_connectivity_finder(dists,atoms)
+    angles=get_close_angles(large_coords,dists,connect)
+
+    #find the cutouts
+    for i,atom in enumerate(atoms):
+        if atom==sorted_cutout_atoms[0]:
+            if len(connect[i])==len(iconnect[cutout_center]):
+                test=True
+                for j in connect[i]:
+                    for k in connect[i]:
+                        if j>k:
+                            if round(angles[i][j][k],round_to) not in center_angles:
+                                test=False
+                                break
+                    if test==False:
+                        break
+                if test==True:
+                    center_i=i
+                    break
+
+    sorted_cutout=[]
+    cutout_dists=[]
+    chosen_atoms=[]
+    for j in connect[center_i]:
+        sorted_cutout.append(large_coords[j])
+        cutout_dists.append(dists[center_i][j])
+        chosen_atoms.append(atoms[j])
+
+    sorted_coords=np.array([x for _,x in sorted(zip(cutout_dists,sorted_cutout))])
+    sorted_coords=np.vstack([large_coords[center_i],sorted_coords])
+    coordinate_center=large_coords[center_i]
+    matched_atoms=np.array([x for _,x in sorted(zip(cutout_dists,chosen_atoms))])
+    matched_atoms=np.concatenate([[atoms[center_i]],matched_atoms])
+    matched_coords=center_coords(sorted_coords)
+
+    return matched_coords, matched_atoms, sorted_cutout_coords, sorted_cutout_atoms, coordinate_center
+
+def angles_on_center(angles,ind,rounded=False):
+    '''
+    The angles array is 3D with many NaN values, but often a 1-D list of all angles centered on a given atom
+    this does that
+    Inputs:
+        angles: p array of angles. NAtoms x NAtoms x NAtoms. all nonbonded entries are NaN. first index is the center of the angle, so (a,b,c)!=(b,a,c)=(b,c,a)
+        ind: int. the 0-centered index of the center atom to get angles on
+        rounded: if rounded is set, it rounds each angle to the given value
+    Ouputs:
+        center_angles: 1D array of angles centered on the atom denoted by ind. len 3 for 3-coordinate, 6 for 4-coordinate, etc.
+    '''
+
+    center_angles=[]
+    for j,atom in enumerate(angles):
+        for k,atom in enumerate(angles):
+            if j>k and k!=ind:
+                if not round:
+                    center_angles.append(angles[ind][j][k])
+                else:
+                    center_angles.append(round(angles[ind][j][k],rounded))
+
+    return center_angles
+
 def get_ind_uc(atoms,connectivity,inds):
     '''
     generates a set of boolean numpy arrays indicating which subset of entered arrays are under-coordinated
@@ -112,8 +211,6 @@ def average_bond_lengths(atoms,dists,connectivity):
                 bond_avs[element][element2]=covalent_radii[element]+covalent_radii[element2]
 
     return bond_avs
-
-
 
 
 def vector_projector(to_project,reference1,reference2):

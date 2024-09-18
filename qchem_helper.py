@@ -10,9 +10,9 @@ python3 compatible
 
 def get_final_serial_geom(file):
     '''
-    Extracts the final input geometry from the output of a series of serial qchem single points
+    Extracts the final input geometry from the input or output of a series of serial qchem single points
     Inputs:
-        file -- .out file with optimization
+        file -- .out or .in file
     Outputs: 
         xyz_coords -- np array with the coordinates of all the atoms (float, NAtoms x 3). Indexed the same as atom_names
         atom_names -- np array with the atom names (str, NAtoms)
@@ -209,7 +209,7 @@ def get_dipole(outfile):
 
     dipole=dipole-(average_coord_vector*charge)
 
-    return dipole
+    return np.array(dipole)
 
 def read_beta_lowdin(outfile,atom,index,orb_num,orb_type):
     '''
