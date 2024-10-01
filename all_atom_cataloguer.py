@@ -435,6 +435,7 @@ def all_atoms_to_excel(file_name,neighbors,angle_cutoff,chosen_states,homo,state
 
 	data=np.array(data)
 	df=pd.DataFrame(data,columns=labels)
+	print(df.dtypes)
 	df.to_excel(file_name,index=False)
 	print("All atom data written to excel file",file_name)
 

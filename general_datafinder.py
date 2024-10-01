@@ -58,11 +58,11 @@ def main():
 
 	parser.add_option("-c","--compare",dest="compare", default=False,help="Compute counts for the pairs of entries between two columns. Data is rounded to the first decimal place so floats work",action="store_true")
 
-	parser.add_option("-k","--cluster",dest="cluster",default=False,help="Perform t-SNE analysis on data. Plots against x,y, and z. Input is the columns to include in the TSNE. Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars.",action="store")
+	parser.add_option("-k","--cluster",dest="cluster",default=False,help="Perform t-SNE analysis on data. Plots against x,y,and z. Input is the columns to include in the TSNE. Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars.",action="store")
 
 	parser.add_option("-p","--print_all",dest="print_all",default=False,help="Print specified columns for all points in constrained set. Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars.",action="store")
 
-	parser.add_option("-d","--double",dest="double",default=False,help="If set, histograms are done as a labeled histogram of the x variable instead of X separate histograms. The value should be the indexing column.",action="store")
+	parser.add_option("-d","--double",dest="double",default=False,help="If set, histograms and scatterplots are labeled by a separate column. For histograms, this only labels the x variable. The value should be the indexing column.",action="store")
 
 	parser.add_option("-l","--scale",dest="scale",default=False,help="If set, scales the specified columns by the specified amount. First argument is what to scale by, second argument is all specified columns in Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars",nargs=2,action="store")
 
@@ -170,12 +170,9 @@ def main():
 		cross_correlate(everything_but,x_label)
 
 	if scatter:
-		target_col.plot.scatter(x=x_label,y=y_label)
-		#plt.xlim(0,6600)
-		#plt.ylim(0,6600)
-		#plt.plot([0,6600],[0,6600],linestyle="dashed")
-		#plt.xticks(range(11),range(11))
-		plt.show()
+
+		plot_scatter(target_col,x_label,y_label,double)
+		
 
 	if box:
 		box_col=target_col.select_dtypes(exclude=['int64'])
@@ -197,6 +194,29 @@ def main():
 	end=time.time()
 	print(round(end-start,1),"seconds")
 
+def plot_scatter(target_col,x_label,y_label,double):
+	'''
+	Plots a scatterplot from a dataframe. Can label points using a third categorical variable
+	Saves it to scatter.pdf
+	'''
+
+	fig,ax=plt.subplots()
+	categories=target_col[double].unique()
+	colors=["blue","orange","purple","yellow","cyan","brown","pink","gray","olive"]
+	for i,category in enumerate(categories):
+		subset=target_col[target_col[double]==category]
+		ax.scatter(subset[x_label],subset[y_label],label=category,color=colors[i])
+
+	ax.legend(title='Category')
+	ax.set_xlabel(x_label)
+	ax.set_ylabel(y_label)
+	# plt.xlim(0,8000)
+	# plt.ylim(0,8000)
+	# plt.plot([0,8000],[0,8000],linestyle="dashed")
+	#plt.xticks(range(11),range(11))
+	plt.show()
+	plt.savefig("scatter.pdf")
+
 def convert_alphabet(input_string):
 		'''
 		Let's be clear, there's probably a better way to do this built in somewhere
@@ -205,23 +225,17 @@ def convert_alphabet(input_string):
 		'''
 		alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+		split=input_string.split(':')
 		output_string=""
-		second=False
-		for i,char in enumerate(input_string):
-			if (char == ":" or char.isnumeric()) and second==False:
-				output_string=output_string+char
-			elif second==False:
-				first=char
-				second=True
-				if i+1==len(input_string):
-					output_string=output_string+str(alphabet.index(first)+1)
-			elif second==True and char==":":
-				output_string=output_string+str(alphabet.index(first)+1)
-				output_string=output_string+char
-				second=False
+		for i,string in enumerate(split):
+			if string=="":
+				output_string=output_string+":"
 			else:
-				output_string=output_string+str(alphabet.index(char)+1+(len(alphabet)*(alphabet.index(first)+1)))
-				second=False
+				value=0
+				for j,char in enumerate(string):
+					value=(value*26)+alphabet.index(char)+1
+				output_string=output_string+str(value)+":"
+		output_string=output_string[:-1]
 
 		return output_string
 
@@ -421,32 +435,57 @@ def constrain_dataframe(x_label,y_label,z_label,nice_constraints,data):
 		everything_but: the full dataframe under the constraints
 	'''
 	columns=[x_label,y_label,z_label]
+	labels=data.columns.tolist()
 	for column in nice_constraints:
 		if column[0] not in columns:
 			columns.append(column[0])
+		if (column[2] in labels) and (column[2] not in columns):
+			columns.append(column[2])
 	target_col=data[columns] #target_col is just the specified x and y and z columns + constraints
 	everything_but=data.copy() #everything but is every column under constraints 
 	for column in nice_constraints:
-		if column[1]=="=":
-			target_col=target_col[target_col[column[0]] == column[2]]
-			everything_but=everything_but[everything_but[column[0]] == column[2]]
-		elif column[1]==">":
-			target_col=target_col[target_col[column[0]] > column[2]]
-			everything_but=everything_but[everything_but[column[0]] > column[2]]
-		elif column[1]=="<":
-			target_col=target_col[target_col[column[0]] < column[2]]
-			everything_but=everything_but[everything_but[column[0]] < column[2]]
-		elif column[1]==">=":
-			target_col=target_col[target_col[column[0]] >= column[2]]
-			everything_but=everything_but[everything_but[column[0]] >= column[2]]
-		elif column[1]=="<=":
-			target_col=target_col[target_col[column[0]] <= column[2]]
-			everything_but=everything_but[everything_but[column[0]] <= column[2]]
-		elif column[1]=="!=":
-			target_col=target_col[target_col[column[0]] != column[2]]
-			everything_but=everything_but[everything_but[column[0]] != column[2]]
+		if column[2] in labels:
+			if column[1]=="=":
+				target_col=target_col[target_col[column[0]] == target_col[column[2]]]
+				everything_but=everything_but[everything_but[column[0]] == column[2]]
+			elif column[1]==">":
+				target_col=target_col[target_col[column[0]] > target_col[[column[2]]]]
+				everything_but=everything_but[everything_but[column[0]] > everything_but[column[2]]]
+			elif column[1]=="<":
+				target_col=target_col[target_col[column[0]] < target_col[column[2]]]
+				everything_but=everything_but[everything_but[column[0]] < everything_but[column[2]]]
+			elif column[1]==">=":
+				target_col=target_col[target_col[column[0]] >= target_col[column[2]]]
+				everything_but=everything_but[everything_but[column[0]] >= everything_but[column[2]]]
+			elif column[1]=="<=":
+				target_col=target_col[target_col[column[0]] <= target_col[column[2]]]
+				everything_but=everything_but[everything_but[column[0]] <= everything_but[column[2]]]
+			elif column[1]=="!=":
+				target_col=target_col[target_col[column[0]] != target_col[column[2]]]
+				everything_but=everything_but[everything_but[column[0]] != everything_but[column[2]]]
+			else:
+				raise Exception("Accepted relationships are =, <, >, >=, <=, !=")
 		else:
-			raise Exception("Accepted relationships are =, <, >, >=, <=, !=")
+			if column[1]=="=":
+				target_col=target_col[target_col[column[0]] == column[2]]
+				everything_but=everything_but[everything_but[column[0]] == column[2]]
+			elif column[1]==">":
+				target_col=target_col[target_col[column[0]] > float(column[2])]
+				everything_but=everything_but[everything_but[column[0]] > float(column[2])]
+			elif column[1]=="<":
+				target_col=target_col[target_col[column[0]] < float(column[2])]
+				everything_but=everything_but[everything_but[column[0]] < float(column[2])]
+			elif column[1]==">=":
+				target_col=target_col[target_col[column[0]] >= float(column[2])]
+				everything_but=everything_but[everything_but[column[0]] >= float(column[2])]
+			elif column[1]=="<=":
+				target_col=target_col[target_col[column[0]] <= float(column[2])]
+				everything_but=everything_but[everything_but[column[0]] <= float(column[2])]
+			elif column[1]=="!=":
+				target_col=target_col[target_col[column[0]] != float(column[2])]
+				everything_but=everything_but[everything_but[column[0]] != float(column[2])]
+			else:
+				raise Exception("Accepted relationships are =, <, >, >=, <=, !=")
 
 	return target_col, everything_but
 
@@ -462,7 +501,8 @@ def cross_correlate(everything_but,x_label):
 	target_data=everything_but[x_label]
 	other_columns=everything_but.drop(columns=[x_label])
 	spearman_corrs=other_columns.corrwith(target_data,method='spearman')
-	spearman_corrs=spearman_corrs.abs().sort_values(3)
+	#spearman_corrs=spearman_corrs.abs().sort_values()
+	spearman_corrs=spearman_corrs.sort_values(key=abs)
 
 	length=len(everything_but)
 	critical=stats.t.ppf(0.999995,length-2) #two-tailed
@@ -489,13 +529,15 @@ def plot_hist(target_col,x_label,double,hist):
 				target_col[double]=target_col[double].round(1)
 			plt.figure()
 			sns.histplot(data=target_col,x=x_label,hue=double,multiple='stack',bins=int(hist),palette='tab10')
-			plt.show()
+			print(target_col[target_col[x_label].notna()].shape[0])
+			#plt.show()
 	else:
 			hist_cols=target_col.select_dtypes(exclude=['int64','object'])
 			for hist_col in hist_cols.columns.tolist():
 				plt.hist(hist_cols[hist_col],bins=int(hist),alpha=(1/len(hist_cols.columns.tolist())),label=hist_col)
 			plt.legend()
-			plt.show()
+			#plt.show()
+	plt.savefig('hist.pdf')
 
 def compare_columns(target_col,x_label,y_label):
 	'''
@@ -569,13 +611,14 @@ def print_cols(print_all,everything_but,labels):
 	printing_data = everything_but.loc[:, labels2print]
 	print(labels2print)
 	print(len(printing_data))
+	print()
 	# for column in labels2print:
 	# 	print()
 	# 	print(column)
 	# 	print()
 	for index, row in printing_data.iterrows():
 		for i,column in enumerate(labels2print):
-			print(row[column]),
+			print(row[column],end="_")
 			if i+1==len(labels2print):
 				print()
 
