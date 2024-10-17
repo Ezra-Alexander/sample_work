@@ -22,7 +22,12 @@ def main():
 	interp=sys.argv[1] #the interpolation.in
 	out=sys.argv[2] #the plot.out
 
-	dir_name="with_proj_dipole" #the name of the directory that each new interpolation directory will be created in
+	#manual parameters
+	dir_name="with_set_dipole" #the name of the directory that each new interpolation directory will be created in
+	run_names=["n0.02","n0.04","n0.06","n0.08","n0.10","0.01","0.02","0.03","0.04","0.05","0.06","0.07","0.08","0.09","0.10","0.12","0.14","0.16","0.18","0.20"] #names of the directories to write
+	run_type="set" #set or mult. Determines how the run strengths are applied. if set, the run strength is the field strength. If mult, the field strength is the total dipole times that value
+	interpolate_field=True #if true, field is gradually increased across interpolation. If false, it is kept constant at the final value
+	run_strengths=[-0.02,-0.04,-0.06,-0.08,-0.10,0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.10,0.12,0.14,0.16,0.18,0.20] #the strength of the field for each run, corresponding to run names
 
 	#read QD .out
 	dipole=get_dipole(out)
@@ -44,24 +49,26 @@ def main():
 
 	rot_dipole=rotate_dipole(centsort_cutout,sorted_icoords,proj_dipole)
 
-	os.makedirs(dir_name,exist_ok=True)
-	os.makedirs(dir_name+"/max",exist_ok=True)
-	os.makedirs(dir_name+"/min",exist_ok=True)
-	os.makedirs(dir_name+"/25",exist_ok=True)
-	os.makedirs(dir_name+"/50",exist_ok=True)
-	os.makedirs(dir_name+"/75",exist_ok=True)
-
 	with open(interp,"r") as file:
-		lines=file.readlines()
-
+			lines=file.readlines()
 	name_split=interp.split(".")
-	dipolify_serial_qchem(lines,rot_dipole,dir_name+"/max",name_split[0]+"_max_dipole.in")
-	dipolify_serial_qchem(lines,rot_dipole/n_an,dir_name+"/min",name_split[0]+"_min_dipole.in")
-	dipolify_serial_qchem(lines,(rot_dipole/n_an)+((rot_dipole-(rot_dipole/n_an))/4),dir_name+"/25",name_split[0]+"_25_dipole.in")
-	dipolify_serial_qchem(lines,(rot_dipole/n_an)+((rot_dipole-(rot_dipole/n_an))/2),dir_name+"/50",name_split[0]+"_50_dipole.in")
-	dipolify_serial_qchem(lines,(rot_dipole/n_an)+((3*(rot_dipole-(rot_dipole/n_an)))/4),dir_name+"/75",name_split[0]+"_75_dipole.in")
 
-def dipolify_serial_qchem(lines,dipole,path,name):
+	os.makedirs(dir_name,exist_ok=True)
+
+	for i,subd in enumerate(run_names):
+
+		os.makedirs(dir_name+"/"+subd,exist_ok=True)
+	
+		if run_type=="set":
+			run_dipole= (rot_dipole*run_strengths[i])/np.linalg.norm(rot_dipole)
+		elif run_type=="mult":
+			run_dipole= (rot_dipole*run_strengths[i])
+		else:
+			raise Exception("Invalid value for run_type: must be 'set' or 'mult'")
+
+		dipolify_serial_qchem(lines,run_dipole,dir_name+"/"+subd,name_split[0]+"_"+subd+".in",interpolate_field)
+		
+def dipolify_serial_qchem(lines,dipole,path,name,interpolate_field=True):
 	'''
 	Takes in the lines of a serial qchem input fike
 	And writes a copy of the file to a specified path
@@ -71,6 +78,7 @@ def dipolify_serial_qchem(lines,dipole,path,name):
 		dipole: a len 3 np array of floats representing the dipole in debye
 		path: the path to the directory to write the new file into
 		name: the name of the file to write
+		interpolate_field: whether the field should be interpolated or kept constant
 	'''
 	dipole=0.393430*dipole #convert to a.u.
 	count=sum(s.count("$molecule") for s in lines)-1
@@ -79,20 +87,28 @@ def dipolify_serial_qchem(lines,dipole,path,name):
 		for line in lines:
 			if line.find("$rem")!=-1:
 				file.write("$multipole_field \n")
-				# file.write("	X "+str((i*dipole[0])/count)+" \n")
-				# file.write("	Y "+str((i*dipole[1])/count)+" \n")
-				# file.write("	Z "+str((i*dipole[2])/count)+" \n")
-				file.write("	X "+str(dipole[0])+" \n") #turns out that using a constant dipole improves convergence
-				file.write("	Y "+str(dipole[1])+" \n")
-				file.write("	Z "+str(dipole[2])+" \n")
+				if interpolate_field:
+					file.write("	X "+str((i*dipole[0])/count)+" \n")
+					file.write("	Y "+str((i*dipole[1])/count)+" \n")
+					file.write("	Z "+str((i*dipole[2])/count)+" \n")
+				else:
+					file.write("	X "+str(dipole[0])+" \n") #turns out that using a constant dipole improves convergence
+					file.write("	Y "+str(-dipole[1])+" \n")
+					file.write("	Z "+str(dipole[2])+" \n")
 				file.write("$end \n")
 				file.write("\n")
 				file.write(line)
-				file.write("scf_algorithm rca_diis \n")
 				file.write("max_scf_cycles 500 \n")
-				file.write("THRESH_RCA_SWITCH 5 \n")
-				file.write("MAX_RCA_CYCLES 250 \n")
+				# file.write("scf_algorithm rca_diis \n")
+				# file.write("THRESH_RCA_SWITCH 5 \n")
+				# file.write("MAX_RCA_CYCLES 250 \n")
 				i=i+1
+			elif line.find("grid_range")!=-1:
+				file.write("grid_range (-5,5) (-5,5) (-5,5) \n")
+			elif line.find("grid_points")!=-1:
+				file.write("grid_points 90 90 90 \n")
+			elif line.find("alpha_molecular_orbital")!=-1:
+				file.write("alpha_molecular_orbital 13 \n")
 			else:
 				file.write(line)
 

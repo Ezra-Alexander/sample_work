@@ -612,15 +612,17 @@ def print_cols(print_all,everything_but,labels):
 	print(labels2print)
 	print(len(printing_data))
 	print()
+	
 	# for column in labels2print:
 	# 	print()
 	# 	print(column)
 	# 	print()
-	for index, row in printing_data.iterrows():
-		for i,column in enumerate(labels2print):
-			print(row[column],end="_")
-			if i+1==len(labels2print):
-				print()
+
+	# for index, row in printing_data.iterrows():
+	# 	for i,column in enumerate(labels2print):
+	# 		print(row[column],end="_")
+	# 		if i+1==len(labels2print):
+	# 			print()
 
 def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30):
 	'''
