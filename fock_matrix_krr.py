@@ -198,6 +198,11 @@ def loop_krr_fock(train_sizes,sads,convergeds,scaling,dir_name,save,alpha,kernel
 
 def split_arrays(array,n_split):
 
+	ut_length=len(array[0])
+	test=ut_length/n_split
+	if (test*(test+1))/2 > ut_length:
+		raise Exception("Too many segments chosen:",test,"is greater than the side length")
+
 	split_array=[[] for _ in range(n_split)]
 
 	for mat in array:
