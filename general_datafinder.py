@@ -756,18 +756,28 @@ def round_to_n_distinct(everything_but,x_label,n_distinct,error_margin=0.5):
 	'''
 	current_distinct=everything_but[x_label].nunique()
 	max_value = everything_but[x_label].max()
-	max_round = -1*(int(np.floor(np.log10(max_value)))+1)
+	max_round = (-1*(int(np.floor(np.log10(max_value)))+1))
 	#print(max_value,max_round,current_distinct)
 	current_round=5
-	while current_round>=max_round:
+	while current_round>max_round:
 		test=everything_but[x_label].round(current_round)
 		current_distinct=test.nunique()
 		#print(current_distinct,current_round)
-		current_round=current_round-1
+		
 
 		if (current_distinct<(n_distinct/error_margin)) and (current_distinct>(n_distinct*error_margin)):
 			everything_but[x_label]=test
 			return everything_but
+
+		test=everything_but[x_label]*2
+		test=test.round(current_round)*0.5
+		current_distinct=test.nunique()
+
+		if (current_distinct<(n_distinct/error_margin)) and (current_distinct>(n_distinct*error_margin)):
+			everything_but[x_label]=test
+			return everything_but
+
+		current_round=current_round-1
 
 	everything_but[x_label]=test	
 	return everything_but
