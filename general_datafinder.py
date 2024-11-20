@@ -68,6 +68,8 @@ def main():
 
 	parser.add_option("-C","--columns",dest="all_columns",default=False,help="If set, prints the labels for all columns",action="store_true")
 
+	parser.add_option("-T","--threshold",dest="threshold",default=False,help="When double is set to a numerical value, this threshold sets 2 categories: below and greater than or equal to that threshold",action="store")
+
 	(options,args)=parser.parse_args()
 	file = options.file
 	file2=options.file2
@@ -91,6 +93,7 @@ def main():
 	double=options.double
 	scale=options.scale
 	all_columns=options.all_columns
+	threshold=float(options.threshold)
 
 	#parse constraint inputs
 	constraints=args #positional arguments:  (column labels, relationship, target values). Column labels and relationships.accepted relationships are =, <, >, >=, <=, !=
@@ -129,7 +132,10 @@ def main():
 		x_label=labels[0]
 	if not y_label:
 		y_label=labels[1]
-	if not z_label:
+
+	if double and not z_label:
+		z_label=double
+	elif not z_label:
 		z_label=labels[2]
 
 	#make custom columns
@@ -171,7 +177,7 @@ def main():
 
 	if scatter:
 
-		plot_scatter(target_col,x_label,y_label,double)
+		plot_scatter(target_col,x_label,y_label,double,threshold)
 		
 
 	if box:
@@ -180,7 +186,7 @@ def main():
 		plt.show()
 
 	if hist:
-		plot_hist(target_col,x_label,double,hist)
+		plot_hist(target_col,x_label,double,hist,threshold)
 
 	if comp:
 		compare_columns(target_col,x_label,y_label)
@@ -194,19 +200,27 @@ def main():
 	end=time.time()
 	print(round(end-start,1),"seconds")
 
-def plot_scatter(target_col,x_label,y_label,double):
+def plot_scatter(target_col,x_label,y_label,double,threshold):
 	'''
 	Plots a scatterplot from a dataframe. Can label points using a third categorical variable
 	Saves it to scatter.pdf
 	'''
 
 	fig,ax=plt.subplots()
-	categories=target_col[double].unique()
 	colors=["blue","orange","purple","yellow","cyan","brown","pink","gray","olive"]
-	for i,category in enumerate(categories):
-		subset=target_col[target_col[double]==category]
-		ax.scatter(subset[x_label],subset[y_label],label=category,color=colors[i])
-
+	if double:
+		if threshold and (target_col[double].dtype=='float64' or target_col[double].dtype=="int64"): 
+			lessthan=target_col[target_col[double]<threshold]
+			ax.scatter(lessthan[x_label],lessthan[y_label],label="Below Threshold",color=colors[0])
+			greater_eq_than=target_col[target_col[double]>=threshold]
+			ax.scatter(greater_eq_than[x_label],greater_eq_than[y_label],label="Above Threshold",color=colors[1])
+		else:
+			categories=target_col[double].unique()			
+			for i,category in enumerate(categories):
+				subset=target_col[target_col[double]==category]
+				ax.scatter(subset[x_label],subset[y_label],label=category,color=colors[i])
+	else:
+		ax.scatter(target_col[x_label],target_col[y_label])
 	ax.legend(title='Category')
 	ax.set_xlabel(x_label)
 	ax.set_ylabel(y_label)
@@ -236,7 +250,7 @@ def convert_alphabet(input_string):
 					value=(value*26)+alphabet.index(char)+1
 				output_string=output_string+str(value)+":"
 		output_string=output_string[:-1]
-
+		print(output_string)
 		return output_string
 
 def mix_cols(mix,labels,data):
@@ -348,7 +362,7 @@ def minmax_cols(minmaxrange,labels,data,minmax):
 		new dataframe with min/max column and with original columns
 	'''
 	minmaxrange=convert_alphabet(minmaxrange)
-
+	#print(minmaxrange)
 	split=minmaxrange.split(':')
 	bounds=[]
 	skip=False
@@ -359,12 +373,12 @@ def minmax_cols(minmaxrange,labels,data,minmax):
 				skip=True
 			else:
 				skip=False
-
-	match=SequenceMatcher(None, labels[bounds[0][0]], labels[bounds[-1][1]]).find_longest_match()
+	#print(len(labels))
+	match=SequenceMatcher(None, labels[bounds[0][0]-1], labels[bounds[-1][1]-1]).find_longest_match()
 	if minmax.lower()=="min":
-		common_name="Min "+labels[bounds[0][0]][match.a:match.a + match.size]
+		common_name="Min "+labels[bounds[0][0]-1][match.a:match.a + match.size]
 	elif minmax.lower()=="max":
-		common_name="Max "+labels[bounds[0][0]][match.a:match.a + match.size]
+		common_name="Max "+labels[bounds[0][0]-1][match.a:match.a + match.size]
 	else:
 		raise Exception("4th argument should be 'min' or 'max'")
 
@@ -378,7 +392,7 @@ def minmax_cols(minmaxrange,labels,data,minmax):
 		while add_index<=bound[1]:
 			labels2mix.append(labels[add_index-1])
 			add_index=add_index+1
-
+	print(labels2mix)
 	if minmax.lower()=="min":
 		new=pd.DataFrame(data.loc[:, labels2mix ].min(axis=1),columns=[common_name])
 	elif minmax.lower()=="max":
@@ -513,7 +527,7 @@ def cross_correlate(everything_but,x_label):
 			print(x_label,"x",index+": ", round(entry,4),"(significance",round(abs(test),2),")")
 
 
-def plot_hist(target_col,x_label,double,hist):
+def plot_hist(target_col,x_label,double,hist,threshold):
 	'''
 	Plot a histogram from a pandas dataframe in one of two ways
 	if double:
@@ -526,17 +540,20 @@ def plot_hist(target_col,x_label,double,hist):
 	if double:
 			target_col=target_col[[x_label,double]]
 			if target_col[double].dtypes!="object":
-				target_col[double]=target_col[double].round(1)
+				if threshold:
+					target_col[double]=target_col[double].apply(lamda x: 'Greater than or Equal to' if x >= threshold else 'Less than')
+				else:
+					target_col[double]=target_col[double].round(1)
 			plt.figure()
 			sns.histplot(data=target_col,x=x_label,hue=double,multiple='stack',bins=int(hist),palette='tab10')
 			print(target_col[target_col[x_label].notna()].shape[0])
-			#plt.show()
+			plt.show()
 	else:
 			hist_cols=target_col.select_dtypes(exclude=['int64','object'])
 			for hist_col in hist_cols.columns.tolist():
 				plt.hist(hist_cols[hist_col],bins=int(hist),alpha=(1/len(hist_cols.columns.tolist())),label=hist_col)
 			plt.legend()
-			#plt.show()
+			plt.show()
 	plt.savefig('hist.pdf')
 
 def compare_columns(target_col,x_label,y_label):
@@ -613,16 +630,20 @@ def print_cols(print_all,everything_but,labels):
 	print(len(printing_data))
 	print()
 	
-	# for column in labels2print:
-	# 	print()
-	# 	print(column)
-	# 	print()
+	printed=[]
+	for index, row in printing_data.iterrows():
+		to_print=[row[x] for x in labels2print]
+		if to_print not in printed:
+			for i,column in enumerate(labels2print):
+				print(row[column],end=" ")
+				#print(row[column])
+				if i+1==len(labels2print):
+					print()
+			printed.append(to_print)
+	print()
+	print(len(printed))
+	print()
 
-	# for index, row in printing_data.iterrows():
-	# 	for i,column in enumerate(labels2print):
-	# 		print(row[column],end="_")
-	# 		if i+1==len(labels2print):
-	# 			print()
 
 def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30):
 	'''
@@ -661,7 +682,7 @@ def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30)
 	for column in everything_but_chosen.columns:
 		if everything_but_chosen[column].dtypes=='object':
 			cat_cols.append(column)
-			print(column)
+			#print(column)
 		else:
 			num_cols.append(column)
 	encode=OneHotEncoder()
@@ -676,24 +697,24 @@ def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30)
 	everything_but['tsne-2d-two'] = tsne[:,1]
 
 	#round x, y, and z to have ~10 different values
-	if everything_but[x_label].dtypes=="float64":
+	if everything_but[x_label].dtypes=="float64" or everything_but[x_label].nunique()>10:
 		everything_but=round_to_n_distinct(everything_but,x_label,10)
-	if everything_but[y_label].dtypes=="float64":
+	if everything_but[y_label].dtypes=="float64" or everything_but[y_label].nunique()>10:
 		everything_but=round_to_n_distinct(everything_but,y_label,10)
-	if everything_but[z_label].dtypes=="float64":
+	if everything_but[z_label].dtypes=="float64" or everything_but[z_label].nunique()>10:
 		everything_but=round_to_n_distinct(everything_but,z_label,10)
 
 	plt.figure(figsize=(16,10))
 	sns.scatterplot(x="tsne-2d-one", y="tsne-2d-two",hue=x_label,palette=sns.color_palette("hls", len(set(everything_but[x_label]))),data=everything_but,legend="full",alpha=0.5)
-	mplcursors.cursor(hover=True).connect("add",on_plot_hover)
+	#mplcursors.cursor(hover=True).connect("add",on_plot_hover)
 	plt.show()
 	plt.figure(figsize=(16,10))
 	sns.scatterplot(x="tsne-2d-one", y="tsne-2d-two",hue=y_label,palette=sns.color_palette("hls", len(set(everything_but[y_label]))),data=everything_but,legend="full",alpha=0.5)
-	mplcursors.cursor(hover=True).connect("add",on_plot_hover)
+	#mplcursors.cursor(hover=True).connect("add",on_plot_hover)
 	plt.show()
 	plt.figure(figsize=(16,10))
 	sns.scatterplot(x="tsne-2d-one", y="tsne-2d-two",hue=z_label,palette=sns.color_palette("hls", len(set(everything_but[z_label]))),data=everything_but,legend="full",alpha=0.5)
-	mplcursors.cursor(hover=True).connect("add",on_plot_hover)
+	#mplcursors.cursor(hover=True).connect("add",on_plot_hover)
 	plt.show()
 
 def scale_columns(data,scale_by,scale_cols,labels):
