@@ -541,7 +541,7 @@ def plot_hist(target_col,x_label,double,hist,threshold):
 			target_col=target_col[[x_label,double]]
 			if target_col[double].dtypes!="object":
 				if threshold:
-					target_col[double]=target_col[double].apply(lamda x: 'Greater than or Equal to' if x >= threshold else 'Less than')
+					target_col[double]=target_col[double].apply(lambda x: 'Greater than or Equal to' if x >= threshold else 'Less than')
 				else:
 					target_col[double]=target_col[double].round(1)
 			plt.figure()
