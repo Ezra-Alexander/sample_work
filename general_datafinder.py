@@ -16,7 +16,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler, LabelEncoder
 from sklearn.compose import ColumnTransformer
 import mplcursors
 import time
-import umap.umap_ as umap
+#import umap.umap_ as umap
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
@@ -214,11 +214,17 @@ def main():
 	if random_forest:
 		labels2mix = alphabet_2_labels(random_forest,labels)
 		if search:
-			top_5=search_random_forest(everything_but,x_label,labels2mix,search)
-			with open("search_results.txt","w") as out:
-				for rank, (score, subset) in enumerate(top_5):
-					index_range = labels_2_alphabet(subset,labels)
-					out.write(f"Rank {rank+1}: \n Score = {score} \n Code = {index_range} \n Subset = {subset}\n")
+
+			# top_5=search_random_forest(everything_but,x_label,labels2mix,search)
+			# with open("search_results.txt","w") as out:
+			# 	for rank, (score, subset) in enumerate(top_5):
+			# 		index_range = labels_2_alphabet(subset,labels)
+			# 		out.write(f"Rank {rank+1}: \n Score = {score} \n Code = {index_range} \n Subset = {subset}\n")
+
+			top_result = better_search_random_forest(everything_but,x_label,labels2mix,search)
+			with open("better_search_results.txt","w") as out:
+				index_range = labels_2_alphabet(top_result[1],labels)
+				out.write(f"Score = {top_result[0]} \n Code = {index_range} \n Subset = {top_result[1]}\n")
 
 		else:
 			do_random_forest(everything_but,x_label,labels2mix)
@@ -304,6 +310,36 @@ def alphabet_2_labels(alphabet,labels):
 			add_index=add_index+1
 
 	return labels2mix
+
+def better_search_random_forest(everything_but,x_label,labels2mix,search,top_result=None,max_attempts=998,attempt_n=0,batch_size=10):
+	#the goal is to implement this as a greedy algorithm
+
+	if top_result is None:
+		score = do_random_forest(everything_but,x_label,labels2mix,search=search)
+		top_result = (score,labels2mix)
+
+	else:
+		if attempt_n >= max_attempts:
+			return top_result
+
+		count = 0 
+		results = []
+		while count < batch_size:
+			subset_size = len(top_result[1])-1
+			subset = random.sample(top_result[1],subset_size)
+
+			score = do_random_forest(everything_but,x_label,subset,search=search)
+			results.append((score,subset))
+			count += 1
+
+		max_scoring = sorted(results,reverse=True,key=lambda x: x[0])[0]
+
+		if max_scoring[0] > top_result[0]:
+
+			top_result=max_scoring
+		
+	return better_search_random_forest(everything_but,x_label,labels2mix,search,max_attempts=max_attempts,top_result=top_result,attempt_n=attempt_n+1,batch_size=batch_size)
+
 
 def search_random_forest(everything_but,x_label,labels2mix,search,top_n=5,top_results=None,max_attempts=999,attempt_n=0):
 
