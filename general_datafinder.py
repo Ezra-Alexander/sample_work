@@ -12,10 +12,14 @@ from optparse import OptionParser
 from difflib import SequenceMatcher
 import seaborn as sns
 from sklearn.manifold import TSNE
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, LabelEncoder
 from sklearn.compose import ColumnTransformer
 import mplcursors
 import time
+import umap.umap_ as umap
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
 start=time.time()
 
 def main():
@@ -70,6 +74,14 @@ def main():
 
 	parser.add_option("-T","--threshold",dest="threshold",default=False,help="When double is set to a numerical value, this threshold sets 2 categories: below and greater than or equal to that threshold",action="store")
 
+	parser.add_option("-u","--umap",dest="use_umap",default=False,help="When set, clustering uses the umap algorithm instead of t-sne",action="store_true")
+
+	parser.add_option("-P","--plot_all",dest="plot_all",default=False,help='When set, all specified columns are plotted for tsne/umap.Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars.',action="store")
+
+	parser.add_option("-R","--random_forest",dest="random_forest",default=False,help="Train and test a random forest classifier to predict the x_variable using the given set of features. Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars.",action="store")
+
+	parser.add_option("-e","--search",dest="search",default=False,help="When on, all set classifiers are subjected to subset searches of the entered features for the best performance on the specified category",action="store")
+
 	(options,args)=parser.parse_args()
 	file = options.file
 	file2=options.file2
@@ -94,6 +106,10 @@ def main():
 	scale=options.scale
 	all_columns=options.all_columns
 	threshold=float(options.threshold)
+	use_umap=options.use_umap
+	plot_all=options.plot_all
+	random_forest=options.random_forest
+	search=options.search
 
 	#parse constraint inputs
 	constraints=args #positional arguments:  (column labels, relationship, target values). Column labels and relationships.accepted relationships are =, <, >, >=, <=, !=
@@ -176,10 +192,8 @@ def main():
 		cross_correlate(everything_but,x_label)
 
 	if scatter:
-
 		plot_scatter(target_col,x_label,y_label,double,threshold)
 		
-
 	if box:
 		box_col=target_col.select_dtypes(exclude=['int64'])
 		box_col.plot.box()
@@ -195,10 +209,155 @@ def main():
 		print_cols(print_all,everything_but,labels)
 
 	if cluster:
-		do_tsne(everything_but,x_label,y_label,z_label,cluster,labels)
+		do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,use_umap,plot_all)
+
+	if random_forest:
+		labels2mix = alphabet_2_labels(random_forest,labels)
+		if search:
+			top_5=search_random_forest(everything_but,x_label,labels2mix,search)
+			with open("search_results.txt","w") as out:
+				for rank, (score, subset) in enumerate(top_5):
+					index_range = labels_2_alphabet(subset,labels)
+					out.write(f"Rank {rank+1}: \n Score = {score} \n Code = {index_range} \n Subset = {subset}\n")
+
+		else:
+			do_random_forest(everything_but,x_label,labels2mix)
 
 	end=time.time()
 	print(round(end-start,1),"seconds")
+
+def labels_2_alphabet(label_set,labels):
+	
+	indices=[]
+	for label in label_set:
+		if (labels.index(label)+1) not in indices:
+			indices.append(labels.index(label)+1)
+
+	indices = sorted(indices)
+
+	code=""
+	previous=-1
+	first=True
+	for i,index in enumerate(indices):
+	 	if first:
+	 		first=False
+	 		previous=index
+	 		code+=int_to_excel(index)
+	 		code+=":"
+	 	else:
+	 		if index == (previous+1):
+	 			previous=index
+	 		else:
+	 			code+=int_to_excel(previous)
+	 			code+="::"
+	 			code+=int_to_excel(index)
+	 			code+=":"
+	 			previous=index
+
+	 	if i+1 == len(indices):
+	 				code+=int_to_excel(index)
+	return code
+
+
+def int_to_excel(number):
+
+	if number<1:
+		raise Exception("Must be positive integer")
+
+	alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+	result=""
+
+	while number>0:
+
+		number = number - 1
+
+		remainder = number % 26
+
+		result+=chr(65+remainder)
+
+		number = number // 26
+
+	return result[::-1]
+
+def alphabet_2_labels(alphabet,labels):
+
+	features=convert_alphabet(alphabet)
+
+	split=features.split(':')
+	bounds=[]
+	skip=False
+	for i,char in enumerate(split):
+		if char!="":
+			if skip==False:
+				bounds.append([int(char),int(split[i+1])])
+				skip=True
+			else:
+				skip=False
+
+	labels2mix=[]
+	for bound in bounds:
+		add_index=bound[0]
+		while add_index<=bound[1]: #automatically drops every label with the word 'index' in it
+			if "index" not in labels[add_index-1].lower():
+				labels2mix.append(labels[add_index-1])
+			add_index=add_index+1
+
+	return labels2mix
+
+def search_random_forest(everything_but,x_label,labels2mix,search,top_n=5,top_results=None,max_attempts=999,attempt_n=0):
+
+	if top_results is None:
+		top_results = []
+
+	if attempt_n >= max_attempts:
+		return top_results
+
+	subset_size = random.randint(1,len(labels2mix))
+	subset = random.sample(labels2mix,subset_size)
+
+	score = do_random_forest(everything_but,x_label,subset,search=search)
+
+	top_results.append((score,subset))
+	top_results = sorted(top_results,reverse=True,key=lambda x: x[0])[:top_n]
+	
+	return search_random_forest(everything_but,x_label,labels2mix,search,top_n=5,max_attempts=max_attempts,top_results=top_results,attempt_n=attempt_n+1)
+
+def do_random_forest(everything_but,x_label,labels2mix,search=False):
+
+
+	everything_but_chosen=everything_but[labels2mix]
+
+	#drop all columns with NaN values
+	everything_but_chosen=everything_but_chosen.drop(columns=everything_but_chosen.columns[everything_but_chosen.isna().any()].tolist())
+
+	print(everything_but_chosen.shape)
+
+	le = LabelEncoder()
+
+	everything_but["encoded state labels"] = le.fit_transform(everything_but[x_label])
+
+
+	X = pd.get_dummies(everything_but_chosen)
+	y = everything_but["encoded state labels"]
+
+	X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2)
+
+	rf = RandomForestClassifier()
+
+	rf.fit(X_train,y_train)
+
+	y_pred = rf.predict(X_test)
+
+	if search:
+		class_rep=classification_report(y_test,y_pred,output_dict=True)
+		return class_rep[search]["f1-score"]
+	else:
+		print("Accuracy:",accuracy_score(y_test,y_pred))
+		print("classification_report:\n",classification_report(y_test,y_pred))
+		print(le.classes_)
+		return None
+
 
 def plot_scatter(target_col,x_label,y_label,double,threshold):
 	'''
@@ -645,7 +804,7 @@ def print_cols(print_all,everything_but,labels):
 	print()
 
 
-def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30):
+def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,use_umap,plot_all,perplexity=20):
 	'''
 	Perform t-SNE analysis on data. Plots against x,y, and z. Input is the columns to include in the TSNE. 
 	Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars.
@@ -691,7 +850,12 @@ def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30)
 	pipeline.fit(everything_but_chosen)
 	transformed_data=pipeline.transform(everything_but_chosen)
 	
-	tsne=TSNE(n_components=2,init="pca",learning_rate="auto",perplexity=perplexity).fit_transform(transformed_data)
+
+	if use_umap:
+		reducer=umap.UMAP()
+		tsne=reducer.fit_transform(transformed_data)
+	else:
+		tsne=TSNE(n_components=2,init="pca",learning_rate="auto",perplexity=perplexity,n_iter=1000).fit_transform(transformed_data)
 
 	everything_but['tsne-2d-one'] = tsne[:,0]
 	everything_but['tsne-2d-two'] = tsne[:,1]
@@ -703,6 +867,8 @@ def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30)
 		everything_but=round_to_n_distinct(everything_but,y_label,10)
 	if everything_but[z_label].dtypes=="float64" or everything_but[z_label].nunique()>10:
 		everything_but=round_to_n_distinct(everything_but,z_label,10)
+
+	everything_but=everything_but.sort_values(by=x_label,ascending=True)
 
 	plt.figure(figsize=(16,10))
 	sns.scatterplot(x="tsne-2d-one", y="tsne-2d-two",hue=x_label,palette=sns.color_palette("hls", len(set(everything_but[x_label]))),data=everything_but,legend="full",alpha=0.5)
@@ -716,6 +882,37 @@ def do_tsne(everything_but,x_label,y_label,z_label,cluster,labels,perplexity=30)
 	sns.scatterplot(x="tsne-2d-one", y="tsne-2d-two",hue=z_label,palette=sns.color_palette("hls", len(set(everything_but[z_label]))),data=everything_but,legend="full",alpha=0.5)
 	#mplcursors.cursor(hover=True).connect("add",on_plot_hover)
 	plt.show()
+
+	if plot_all:
+		plot_all=convert_alphabet(plot_all)
+
+		split=plot_all.split(':')
+		bounds=[]
+		skip=False
+		for i,char in enumerate(split):
+			if char!="":
+				if skip==False:
+					bounds.append([int(char),int(split[i+1])])
+					skip=True
+				else:
+					skip=False
+
+		labels2mix=[]
+		for bound in bounds:
+			add_index=bound[0]
+			while add_index<=bound[1]:
+				labels2mix.append(labels[add_index-1])
+				add_index=add_index+1
+
+		for label in labels2mix:
+			if label not in [x_label,y_label,z_label]:
+				if everything_but[label].dtypes=="float64" or everything_but[label].nunique()>10:
+					everything_but=round_to_n_distinct(everything_but,label,10)
+				plt.figure(figsize=(16,10))
+				sns.scatterplot(x="tsne-2d-one", y="tsne-2d-two",hue=label,palette=sns.color_palette("hls", len(set(everything_but[label]))),data=everything_but,legend="full",alpha=0.5)
+				#mplcursors.cursor(hover=True).connect("add",on_plot_hover)
+				plt.show()
+
 
 def scale_columns(data,scale_by,scale_cols,labels):
 	scale_cols=convert_alphabet(scale_cols)
