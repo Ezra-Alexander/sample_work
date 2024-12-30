@@ -82,6 +82,8 @@ def main():
 
 	parser.add_option("-e","--search",dest="search",default=False,help="When on, all set classifiers are subjected to subset searches of the entered features for the best performance on the specified category",action="store")
 
+	parser.add_option("-B","--better_search",dest="better_search",default=False,help="When set, uses the greedy search algorithm",action="store_true")
+
 	(options,args)=parser.parse_args()
 	file = options.file
 	file2=options.file2
@@ -110,6 +112,7 @@ def main():
 	plot_all=options.plot_all
 	random_forest=options.random_forest
 	search=options.search
+	better_search = options.better_search
 
 	#parse constraint inputs
 	constraints=args #positional arguments:  (column labels, relationship, target values). Column labels and relationships.accepted relationships are =, <, >, >=, <=, !=
@@ -214,17 +217,17 @@ def main():
 	if random_forest:
 		labels2mix = alphabet_2_labels(random_forest,labels)
 		if search:
-
-			# top_5=search_random_forest(everything_but,x_label,labels2mix,search)
-			# with open("search_results.txt","w") as out:
-			# 	for rank, (score, subset) in enumerate(top_5):
-			# 		index_range = labels_2_alphabet(subset,labels)
-			# 		out.write(f"Rank {rank+1}: \n Score = {score} \n Code = {index_range} \n Subset = {subset}\n")
-
-			top_result = better_search_random_forest(everything_but,x_label,labels2mix,search)
-			with open("better_search_results.txt","w") as out:
-				index_range = labels_2_alphabet(top_result[1],labels)
-				out.write(f"Score = {top_result[0]} \n Code = {index_range} \n Subset = {top_result[1]}\n")
+			if better_search:
+				top_result = better_search_random_forest(everything_but,x_label,labels2mix,search)
+				with open("better_search_results.txt","w") as out:
+					index_range = labels_2_alphabet(top_result[1],labels)
+					out.write(f"Score = {top_result[0]} \n Code = {index_range} \n Subset = {top_result[1]}\n")
+			else:
+				top_5=search_random_forest(everything_but,x_label,labels2mix,search)
+				with open("search_results.txt","w") as out:
+					for rank, (score, subset) in enumerate(top_5):
+						index_range = labels_2_alphabet(subset,labels)
+						out.write(f"Rank {rank+1}: \n Score = {score} \n Code = {index_range} \n Subset = {subset}\n")
 
 		else:
 			do_random_forest(everything_but,x_label,labels2mix)
@@ -341,7 +344,7 @@ def better_search_random_forest(everything_but,x_label,labels2mix,search,top_res
 	return better_search_random_forest(everything_but,x_label,labels2mix,search,max_attempts=max_attempts,top_result=top_result,attempt_n=attempt_n+1,batch_size=batch_size)
 
 
-def search_random_forest(everything_but,x_label,labels2mix,search,top_n=5,top_results=None,max_attempts=999,attempt_n=0):
+def search_random_forest(everything_but,x_label,labels2mix,search,top_n=5,top_results=None,max_attempts=9,attempt_n=0):
 
 	if top_results is None:
 		top_results = []
