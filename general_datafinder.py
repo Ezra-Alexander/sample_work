@@ -20,6 +20,7 @@ import time
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
+from imblearn.over_sampling import SMOTE
 start=time.time()
 
 def main():
@@ -84,6 +85,8 @@ def main():
 
 	parser.add_option("-B","--better_search",dest="better_search",default=False,help="When set, uses the greedy search algorithm",action="store_true")
 
+	parser.add_option("-i","--temp_edit",dest="temp_edit",default=False,help="A multi part input, in quotes, space separated. 'col_to_edit new_val col_constraint operator value ...'. e.g. 'D ambiguous D = Structural H < 0.15 G > 0.05'",action="store")
+
 	(options,args)=parser.parse_args()
 	file = options.file
 	file2=options.file2
@@ -113,6 +116,7 @@ def main():
 	random_forest=options.random_forest
 	search=options.search
 	better_search = options.better_search
+	temp_edit = options.temp_edit
 
 	#parse constraint inputs
 	constraints=args #positional arguments:  (column labels, relationship, target values). Column labels and relationships.accepted relationships are =, <, >, >=, <=, !=
@@ -156,6 +160,10 @@ def main():
 		z_label=double
 	elif not z_label:
 		z_label=labels[2]
+
+	#make temp dataframe edits
+	if temp_edit:
+		data = replace_vals(data,labels,temp_edit)
 
 	#make custom columns
 	if mix:
@@ -217,6 +225,7 @@ def main():
 	if random_forest:
 		labels2mix = alphabet_2_labels(random_forest,labels)
 		if search:
+			sys.setrecursionlimit(1500)
 			if better_search:
 				top_result = better_search_random_forest(everything_but,x_label,labels2mix,search)
 				with open("better_search_results.txt","w") as out:
@@ -234,6 +243,39 @@ def main():
 
 	end=time.time()
 	print(round(end-start,1),"seconds")
+
+def replace_vals(data,labels,temp_edit):
+
+	split = temp_edit.split()
+	col_to_edit, new_val = split[:2]
+
+	col_to_edit = labels[int(convert_alphabet(col_to_edit)) -1 ]
+
+	criteria = True
+	for i in range(len(split[2:])//3):
+
+		col_to_check = labels[int(convert_alphabet(split[(3*i)+2])) -1 ]
+		operator = split[(3*i)+3]
+		value = split[(3*i)+4]
+
+		try:
+			temp = float(value)
+			value = temp
+		except ValueError:
+			pass
+
+		if operator == "=":
+			criteria = criteria & (data[col_to_check] == value)
+		elif operator == ">":
+			criteria = criteria & (data[col_to_check] > value)
+		elif operator == "<":
+			criteria = criteria & (data[col_to_check] < value)
+
+
+	data.loc[criteria,col_to_edit] = new_val
+	print(data[col_to_edit].value_counts())
+
+	return data
 
 def labels_2_alphabet(label_set,labels):
 	
@@ -314,7 +356,7 @@ def alphabet_2_labels(alphabet,labels):
 
 	return labels2mix
 
-def better_search_random_forest(everything_but,x_label,labels2mix,search,top_result=None,max_attempts=998,attempt_n=0,batch_size=10):
+def better_search_random_forest(everything_but,x_label,labels2mix,search,top_result=None,max_attempts=1000,attempt_n=0,batch_size=10):
 	#the goal is to implement this as a greedy algorithm
 
 	if top_result is None:
@@ -344,7 +386,7 @@ def better_search_random_forest(everything_but,x_label,labels2mix,search,top_res
 	return better_search_random_forest(everything_but,x_label,labels2mix,search,max_attempts=max_attempts,top_result=top_result,attempt_n=attempt_n+1,batch_size=batch_size)
 
 
-def search_random_forest(everything_but,x_label,labels2mix,search,top_n=5,top_results=None,max_attempts=9,attempt_n=0):
+def search_random_forest(everything_but,x_label,labels2mix,search,top_n=5,top_results=None,max_attempts=1000,attempt_n=0):
 
 	if top_results is None:
 		top_results = []
@@ -382,7 +424,15 @@ def do_random_forest(everything_but,x_label,labels2mix,search=False):
 
 	X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2)
 
-	rf = RandomForestClassifier()
+	# print(np.unique(y_train,return_counts=True))
+	# smote1 = SMOTE()
+	# X_train, y_train = smote1.fit_resample(X_train,y_train)
+	# print(np.unique(y_train,return_counts=True))
+	# smote2 = SMOTE(sampling_strategy = 'minority')
+	# X_train, y_train = smote2.fit_resample(X_train,y_train)
+	# print(np.unique(y_train,return_counts=True))
+
+	rf = RandomForestClassifier() #class_weight={0:1,1:4,2:4,3:1}
 
 	rf.fit(X_train,y_train)
 
@@ -448,7 +498,7 @@ def convert_alphabet(input_string):
 					value=(value*26)+alphabet.index(char)+1
 				output_string=output_string+str(value)+":"
 		output_string=output_string[:-1]
-		print(output_string)
+		
 		return output_string
 
 def mix_cols(mix,labels,data):
