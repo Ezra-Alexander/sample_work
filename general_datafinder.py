@@ -21,6 +21,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 from imblearn.over_sampling import SMOTE
+from sklearn.neural_network import MLPClassifier
 start=time.time()
 
 def main():
@@ -87,36 +88,39 @@ def main():
 
 	parser.add_option("-i","--temp_edit",dest="temp_edit",default=False,help="A multi part input, in quotes, space separated. 'col_to_edit new_val col_constraint operator value ...'. e.g. 'D ambiguous D = Structural H < 0.15 G > 0.05'",action="store")
 
-	(options,args)=parser.parse_args()
+	parser.add_option("-n","--neural_net",dest="neural_net",default=False,help="Train and test a neural network classifier to predict the x_variable using the given set of features. Format col_low:col_high:: ... ::col_low:col_high for noncontiguous ranges as ints or excel chars.",action="store")
+
+	(options,args) = parser.parse_args()
 	file = options.file
-	file2=options.file2
+	file2 = options.file2
 	# count = options.count
 	x_label = options.x_label
 	y_label = options.y_label
 	z_label = options.z_label
 	scatter = options.scatter
-	box=options.box
-	hist=options.hist
-	mix=options.mix
-	minrange=options.minrange
-	average=options.average
-	maxrange=options.maxrange
-	one_hot=options.one_hot
-	stats=options.stats
-	corr=options.correlation
-	comp=options.compare
-	cluster=options.cluster
-	print_all=options.print_all
-	double=options.double
-	scale=options.scale
-	all_columns=options.all_columns
-	threshold=float(options.threshold)
-	use_umap=options.use_umap
-	plot_all=options.plot_all
-	random_forest=options.random_forest
-	search=options.search
+	box = options.box
+	hist = options.hist
+	mix = options.mix
+	minrange = options.minrange
+	average = options.average
+	maxrange = options.maxrange
+	one_hot = options.one_hot
+	stats = options.stats
+	corr = options.correlation
+	comp = options.compare
+	cluster = options.cluster
+	print_all = options.print_all
+	double = options.double
+	scale = options.scale
+	all_columns = options.all_columns
+	threshold = float(options.threshold)
+	use_umap = options.use_umap
+	plot_all = options.plot_all
+	random_forest = options.random_forest
+	search = options.search
 	better_search = options.better_search
 	temp_edit = options.temp_edit
+	neural_net = options.neural_net
 
 	#parse constraint inputs
 	constraints=args #positional arguments:  (column labels, relationship, target values). Column labels and relationships.accepted relationships are =, <, >, >=, <=, !=
@@ -241,8 +245,51 @@ def main():
 		else:
 			do_random_forest(everything_but,x_label,labels2mix)
 
+	if neural_net:
+		labels2mix = alphabet_2_labels(neural_net,labels)
+		do_nn_classifier(everything_but,x_label,labels2mix)
+
 	end=time.time()
 	print(round(end-start,1),"seconds")
+
+def do_nn_classifier(everything_but,x_label,labels2mix):
+
+	everything_but_chosen=everything_but[labels2mix]
+
+	#drop all columns with NaN values
+	everything_but_chosen=everything_but_chosen.drop(columns=everything_but_chosen.columns[everything_but_chosen.isna().any()].tolist())
+
+	print(everything_but_chosen.shape)
+
+	le = LabelEncoder()
+
+	everything_but["encoded state labels"] = le.fit_transform(everything_but[x_label])
+
+
+	X = pd.get_dummies(everything_but_chosen)
+	y = everything_but["encoded state labels"]
+
+	X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2)
+
+	# print(np.unique(y_train,return_counts=True))
+	# smote1 = SMOTE()
+	# X_train, y_train = smote1.fit_resample(X_train,y_train)
+	# print(np.unique(y_train,return_counts=True))
+	# smote2 = SMOTE(sampling_strategy = 'minority')
+	# X_train, y_train = smote2.fit_resample(X_train,y_train)
+	# print(np.unique(y_train,return_counts=True))
+
+	nn = 
+
+	nn.fit(X_train,y_train)
+
+	y_pred = nn.predict(X_test)
+
+
+
+	print("Accuracy:",accuracy_score(y_test,y_pred))
+	print("classification_report:\n",classification_report(y_test,y_pred))
+	print(le.classes_)
 
 def replace_vals(data,labels,temp_edit):
 
