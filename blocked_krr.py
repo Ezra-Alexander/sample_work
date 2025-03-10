@@ -33,7 +33,7 @@ def main():
 	n_split=int(sys.argv[3]) #number of blocks to split into. Must evenly divide UT matrix
 
 	#user parameters
-	train_sizes=[50,100,250,500,750, 1000, 1500, 2000,2500]
+	train_sizes=[50,100,250,500]
 	#alpha=0.001 #regularization strength
 	solve=False #whether or not to solve the generated Hamiltonians to find total energies, MO energies, etc. Options are all, False, or a specific train size
 	save=False #whether or not to save the generated Hamiltonians
@@ -41,9 +41,10 @@ def main():
 		#not clear to me yet what the constraints on this are, but for now I'm throwing an exception if it doesn't evenly divide the upper-triangular part of the matrix
 	inner_product_type='classic' #only supports the Frobenius inner product right now (np.vdot). The alternative is to introduce an overlap matrix
 	scaling=False #standard scaling, applied to both inputs and outputs
+	cutoff_t = 2000 #for using a subset of the available time files. Either the number you wish to include (first N) or False to use all
+	span_c = True #whether or not to use the span correction term
 
-	#this implementation only supports the blocked KRR splitting approach
-	#I have also currently not implemented the span correction term
+	#this implementation only supports the blocked KRR splitting approach, but retains the functions necessary for Akimov's approach
 	#this implementation also currently only implements the full cross-block approach
 
 	#first, read in the matrices
@@ -62,6 +63,13 @@ def main():
 	converged_files=np.take_along_axis(converged_files,sort_key,-1)
 	sad_files=np.take_along_axis(sad_files,sort_key,-1)
 	xyz_files=np.take_along_axis(xyz_files,sort_key,-1)
+
+	#cutoff some number of timesteps if specified
+	if cutoff_t:
+		sad_files = sad_files[:cutoff_t]
+		converged_files = converged_files[:cutoff_t]
+		xyz_files = xyz_files[:cutoff_t]
+
 	n_timesteps = len(xyz_files)
 
 	#load the matrices
@@ -81,7 +89,7 @@ def main():
 		os.mkdir(dir_name)
 
 	#all krr happens here
-	all_predicted=loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling)
+	all_predicted=loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c)
 
 	#solve predicted hamiltonians for total energy / mo energies
 	if solve:
@@ -231,7 +239,7 @@ def unblock_ut_mats(blocks):
 
 	return unblocked
 
-def blocked_krr(F_tilde,f_tilde,F,alpha,inner_product_type):
+def blocked_krr(F_tilde,f_tilde,F,alpha,inner_product_type,span_c):
 
 	#note that this implementation computes all the predicts at once as one supermatrix
 	#I'm not yet sure if that is equivalent
@@ -265,7 +273,18 @@ def blocked_krr(F_tilde,f_tilde,F,alpha,inner_product_type):
 	else:
 		raise Exception("Other inner products not implemented")
 
-	predicted = f_tilde_by_F_tilde  @ np.linalg.inv(S_tilde + gamma_2) @ F
+	inv = np.linalg.inv(S_tilde + gamma_2)
+
+	predicted = f_tilde_by_F_tilde  @ inv  @ F
+
+	if span_c:
+
+		f_bar = f_tilde_by_F_tilde  @ inv  @ F_tilde
+
+		correction = f_tilde - f_bar
+
+		predicted = predicted + correction
+
 
 	return predicted
 
@@ -413,17 +432,17 @@ def round_2_sigfigs(n,sigfigs):
 
 	return round(n,sigfigs-int(math.floor(math.log10(abs(n)))))
 
-def loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling):
+def loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c):
 	num_workers = os.cpu_count()
 	all_predicted=[]
 
-	for train_size in train_sizes:
-		if train_size<n_timesteps:
+	# for train_size in train_sizes:
+	# 	if train_size<n_timesteps:
 
-			predicted=krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling)
-			all_predicted.append(predicted)
+	# 		predicted=krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c)
+	# 		all_predicted.append(predicted)
 
-	#all_predicted = Parallel(n_jobs = num_workers)(delayed(krr_fock)(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling) for train_size in train_sizes if train_size < n_timesteps)
+	all_predicted = Parallel(n_jobs = num_workers)(delayed(krr_fock)(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c) for train_size in train_sizes if train_size < n_timesteps)
 
 	return all_predicted
 
@@ -480,7 +499,7 @@ def split_krr_fock(pipe,X_train,y_train,X_test,cross):
 
 	return predicted
 
-def krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling):
+def krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c):
 
 	if scaling: #note that this scaling treats element a of each block the same, which may not be the best way to do this, but its worth trying
 		x_scaler = StandardScaler()
@@ -495,8 +514,8 @@ def krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_ty
 	y_test=scf_super[cutoff_ntnb:]
 
 	#where the magic happens
-	predicted = blocked_krr(X_train,X_test,y_train,alpha,inner_product_type)
-	predict_train = blocked_krr(X_train,X_train,y_train,alpha,inner_product_type)
+	predicted = blocked_krr(X_train,X_test,y_train,alpha,inner_product_type,span_c)
+	predict_train = blocked_krr(X_train,X_train,y_train,alpha,inner_product_type,span_c)
 	# predicted = elementwise_blocked_krr(X_train,X_test,y_train,alpha,inner_product_type,n_split)
 	# predict_train = elementwise_blocked_krr(X_train,X_train,y_train,alpha,inner_product_type,n_split)
 	
