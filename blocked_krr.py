@@ -31,18 +31,17 @@ def main():
 	dir_name=sys.argv[1] #the name of the directory to write the predicted fock matrices to 
 	alpha = float(sys.argv[2]) #regularization strength
 	n_split=int(sys.argv[3]) #number of blocks to split into. Must evenly divide UT matrix
+	#not clear to me yet what the constraints on this are, but for now I'm throwing an exception if it doesn't evenly divide the upper-triangular part of the matrix
+	cutoff_t = int(sys.argv[4]) #for using a subset of the available time files. Either the number you wish to include (first N) or 0 to use all
+	span_c = bool(sys.argv[5]) #whether or not to use the span correction term
+	next_t = int(sys.argv[6]) #the number of future timesteps to predict. If greater than the number available, just cuts off
 
 	#user parameters
-	train_sizes=[50,100,250,500]
-	#alpha=0.001 #regularization strength
+	train_sizes=[50,100,250,500,750,1000,1500]
 	solve=False #whether or not to solve the generated Hamiltonians to find total energies, MO energies, etc. Options are all, False, or a specific train size
-	save=False #whether or not to save the generated Hamiltonians
-	#n_split=10 #number of blocks to split into.  
-		#not clear to me yet what the constraints on this are, but for now I'm throwing an exception if it doesn't evenly divide the upper-triangular part of the matrix
+	save=False #whether or not to save the generated Hamiltonians		
 	inner_product_type='classic' #only supports the Frobenius inner product right now (np.vdot). The alternative is to introduce an overlap matrix
 	scaling=False #standard scaling, applied to both inputs and outputs
-	cutoff_t = 2000 #for using a subset of the available time files. Either the number you wish to include (first N) or False to use all
-	span_c = True #whether or not to use the span correction term
 
 	#this implementation only supports the blocked KRR splitting approach, but retains the functions necessary for Akimov's approach
 	#this implementation also currently only implements the full cross-block approach
@@ -89,7 +88,7 @@ def main():
 		os.mkdir(dir_name)
 
 	#all krr happens here
-	all_predicted=loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c)
+	all_predicted=loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c, next_t)
 
 	#solve predicted hamiltonians for total energy / mo energies
 	if solve:
@@ -116,57 +115,6 @@ def main():
 	end=time.time()
 	print("Timing:",round(end-start,1),"s")
 
-def un_supermat(supermat,n_timesteps,n_split):
-	#the inverse of to_supermat
-
-	_, nb = supermat.shape
-
-	n_row_per_block = math.sqrt(nb)
-
-	timesteps_blocks = np.zeros((n_timesteps,n_split,n_row_per_block,n_row_per_block))
-
-	timestep = 0
-	block = 0
-	for block in supermat:
-		row = 0
-		col = 0
-		for el in row:
-			timesteps_blocks[timestep][block][row][col] = el
-
-			if col+1==n_row_per_block:
-				row += 1
-				col = 0
-			else:
-				col += 1
-		if block+1 == n_split:
-			timestep += 1
-			block = 0
-		else:
-			block += 1
-
-	return timesteps_blocks
-
-def to_supermat(ut_blocks):
-	#turns a 4D block series (timesteps x blocks x 2D matrices) to a 2D supermatrix of (timesteps * blocks) x block element
-
-	n_timesteps , n_blocks, n_rows, n_cols = ut_blocks.shape
-
-	supermat = np.zeros((n_timesteps*n_blocks,n_rows*n_cols))
-
-	for timestep, blocks in enumerate(ut_blocks):
-		for block_n, block_els in enumerate(blocks):
-			for row_n, row in enumerate(block_els):
-				for col_n,element in enumerate(row):
-					supermat[ (timestep * n_blocks) + block_n , (row_n * n_cols) + col_n] = element
-
-	return supermat
-
-def in_prod(A,B,inner_product_type): 
-	if inner_product_type=="classic":
-		return np.vdot(A,B)
-	else:
-		raise Exception("Specified inner product not yet implemented")
-
 def ut_block(matrices,n_split):
 	'''
 	Outputs one set of blocks per matrix, and the blocks are ouput as an array (instead of as a matrix of matrices)
@@ -178,7 +126,7 @@ def ut_block(matrices,n_split):
 	'''
 	matrices=np.array(matrices)
 	timesteps=[]
-	roots=np.roots([1,1,-2*n_split])
+	roots=np.roots([1,1,-2*n_split]) # roots of x^2 + x - 2*n_split
 	for matrix in matrices:
 
 		rows,cols=matrix.shape
@@ -186,7 +134,7 @@ def ut_block(matrices,n_split):
 			raise Exception("Matrices are not square!")
 		
 		n_blocks_per_row=[x for x in roots if x>0][0]	
-		block_nrow=rows/n_blocks_per_row
+		block_nrow=rows/n_blocks_per_row #the block size
 		if not block_nrow.is_integer():
 			raise Exception("Chosen n_split does not evenly divide matrix")
 		block_nrow=int(block_nrow)
@@ -203,41 +151,77 @@ def ut_block(matrices,n_split):
 
 	return np.array(timesteps)
 
-def unblock_ut_mats(blocks):
-	'''
-	the inverse of the ut_block function
-	Inputs:
-		a np array of ut blocked matrices (np array (timesteps) of np array (blocks) of np array (rows) x np array (columns))
-	Outputs:
-		a np array of matrices (a np array (timesteps) of np array (rows) x np array (columns))
-	'''
-	blocks=np.array(blocks,dtype=np.float128)
-	unblocked=[]
-	for timestep in blocks:
-		n_blocks=len(timestep)
-		roots=np.roots([1,1,-2*n_blocks])
-		n_blocks_per_row=[x for x in roots if x>0][0]
-		block_size=len(timestep[0])
-		big_mat_size=int(n_blocks_per_row*block_size)
-		big_mat=np.zeros((big_mat_size,big_mat_size),dtype=np.float128)
-		block_row=0
-		block_col=0
-		for block in timestep:
-			#print(block_row,block_col)
-			big_mat[block_row : block_row + block_size , block_col : block_col + block_size] = block
 
-			if block_row!=block_col: #off-diagonals
-				big_mat[block_col : block_col + block_size , block_row : block_row + block_size] = block.T
+def to_supermat(ut_blocks):
+	#turns a 4D block series (timesteps x blocks x 2D matrices) to a 2D supermatrix of (timesteps * blocks) x block element
 
-			if (block_col/block_size)<n_blocks_per_row-1:
-				block_col=block_col+block_size
-			else:
-				block_row=block_row+block_size
-				block_col=block_row
+	n_timesteps , n_blocks, n_rows, n_cols = ut_blocks.shape
 
-		unblocked.append(big_mat)
+	supermat = np.zeros((n_timesteps*n_blocks,n_rows*n_cols))
 
-	return unblocked
+	for timestep, blocks in enumerate(ut_blocks):
+		for block_n, block_els in enumerate(blocks):
+			for row_n, row in enumerate(block_els):
+				for col_n,element in enumerate(row):
+					supermat[ (timestep * n_blocks) + block_n , (row_n * n_cols) + col_n] = element
+
+	return supermat
+
+
+def loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c, next_t):
+	num_workers = os.cpu_count()
+	all_predicted=[]
+
+	for train_size in train_sizes:
+		if train_size<n_timesteps:
+
+			predicted=krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c, next_t)
+			all_predicted.append(predicted)
+
+	#all_predicted = Parallel(n_jobs = num_workers)(delayed(krr_fock)(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c) for train_size in train_sizes if train_size < n_timesteps)
+
+	return all_predicted
+
+
+def krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c,next_t):
+
+	if scaling: #note that this scaling treats element a of each block the same, which may not be the best way to do this, but its worth trying
+		x_scaler = StandardScaler()
+		y_scaler = StandardScaler()
+		sad_super = x_scaler.fit_transform(sad_super)
+		scf_super = y_scaler.fit_transform(scf_super)
+
+	cutoff_ntnb = train_size*n_split
+	X_train=sad_super[:cutoff_ntnb]
+	X_test=sad_super[cutoff_ntnb:]
+	y_train=scf_super[:cutoff_ntnb]
+	y_test=scf_super[cutoff_ntnb:]
+
+	if next_t:
+		cutoff_next_tb = next_t*n_split
+		X_test = X_test[:cutoff_next_tb]
+		y_test = y_test[:cutoff_next_tb]
+
+	#where the magic happens
+	predicted = blocked_krr(X_train,X_test,y_train,alpha,inner_product_type,span_c)
+	predict_train = blocked_krr(X_train,X_train,y_train,alpha,inner_product_type,span_c)
+	# predicted = elementwise_blocked_krr(X_train,X_test,y_train,alpha,inner_product_type,n_split)
+	# predict_train = elementwise_blocked_krr(X_train,X_train,y_train,alpha,inner_product_type,n_split)
+	
+	if scaling:
+		y_train = y_scaler.inverse_transform(y_train)
+		predicted = y_scaler.inverse_transform(predicted)
+		y_test = y_scaler.inverse_transform(y_test)
+		predict_train = y_scaler.inverse_transform(predict_train)
+
+	mae_train, mae_test = find_mae(y_train,predicted,y_test,predict_train,train_size)	
+
+	if save:
+		name=dir_name+"/predicted_converged_focks_train_"+str(train_size)+".npy"
+		np.save(name,predicted)
+
+	return predicted
+
 
 def blocked_krr(F_tilde,f_tilde,F,alpha,inner_product_type,span_c):
 
@@ -287,6 +271,100 @@ def blocked_krr(F_tilde,f_tilde,F,alpha,inner_product_type,span_c):
 
 
 	return predicted
+
+
+def find_mae(y_train,predicted,y_test,predict_train,train_size):
+
+	
+	abs_diff_train=np.abs(predict_train-y_train)
+	mae_train=np.mean(abs_diff_train)
+	print("Train MAE matrix elements w/ train size",train_size,":",round_2_sigfigs(mae_train,3))
+
+	abs_diff_test=np.abs(predicted-y_test)
+	mae_test=np.mean(abs_diff_test)
+	print("Test MAE matrix elements w/ train size",train_size,":",round_2_sigfigs(mae_test,3))
+
+	return mae_train, mae_test
+
+
+
+def un_supermat(supermat,n_timesteps,n_split):
+	#the inverse of to_supermat
+
+	_, nb = supermat.shape
+
+	n_row_per_block = math.sqrt(nb)
+
+	timesteps_blocks = np.zeros((n_timesteps,n_split,n_row_per_block,n_row_per_block))
+
+	timestep = 0
+	block = 0
+	for block in supermat:
+		row = 0
+		col = 0
+		for el in row:
+			timesteps_blocks[timestep][block][row][col] = el
+
+			if col+1==n_row_per_block:
+				row += 1
+				col = 0
+			else:
+				col += 1
+		if block+1 == n_split:
+			timestep += 1
+			block = 0
+		else:
+			block += 1
+
+	return timesteps_blocks
+
+
+
+def in_prod(A,B,inner_product_type): 
+	if inner_product_type=="classic":
+		return np.vdot(A,B)
+	else:
+		raise Exception("Specified inner product not yet implemented")
+
+
+
+def unblock_ut_mats(blocks):
+	'''
+	the inverse of the ut_block function
+	Inputs:
+		a np array of ut blocked matrices (np array (timesteps) of np array (blocks) of np array (rows) x np array (columns))
+	Outputs:
+		a np array of matrices (a np array (timesteps) of np array (rows) x np array (columns))
+	'''
+	blocks=np.array(blocks,dtype=np.float128)
+	unblocked=[]
+	for timestep in blocks:
+		n_blocks=len(timestep)
+		roots=np.roots([1,1,-2*n_blocks])
+		n_blocks_per_row=[x for x in roots if x>0][0]
+		block_size=len(timestep[0])
+		big_mat_size=int(n_blocks_per_row*block_size)
+		big_mat=np.zeros((big_mat_size,big_mat_size),dtype=np.float128)
+		block_row=0
+		block_col=0
+		for block in timestep:
+			#print(block_row,block_col)
+			big_mat[block_row : block_row + block_size , block_col : block_col + block_size] = block
+
+			if block_row!=block_col: #off-diagonals
+				big_mat[block_col : block_col + block_size , block_row : block_row + block_size] = block.T
+
+			if (block_col/block_size)<n_blocks_per_row-1:
+				block_col=block_col+block_size
+			else:
+				block_row=block_row+block_size
+				block_col=block_row
+
+		unblocked.append(big_mat)
+
+	return unblocked
+
+
 
 def elementwise_blocked_krr(F_tilde,f_tilde,F,alpha,inner_product_type,n_split):
 	#replaces the matrix multiplication with good old fashioned element-wise computation
@@ -432,19 +510,7 @@ def round_2_sigfigs(n,sigfigs):
 
 	return round(n,sigfigs-int(math.floor(math.log10(abs(n)))))
 
-def loop_krr_fock(train_sizes,sad_super,scf_super,n_timesteps,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c):
-	num_workers = os.cpu_count()
-	all_predicted=[]
 
-	# for train_size in train_sizes:
-	# 	if train_size<n_timesteps:
-
-	# 		predicted=krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c)
-	# 		all_predicted.append(predicted)
-
-	all_predicted = Parallel(n_jobs = num_workers)(delayed(krr_fock)(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c) for train_size in train_sizes if train_size < n_timesteps)
-
-	return all_predicted
 
 def split_arrays(array,n_split,cross,type): #unused
 
@@ -499,52 +565,9 @@ def split_krr_fock(pipe,X_train,y_train,X_test,cross):
 
 	return predicted
 
-def krr_fock(train_size,sad_super,scf_super,dir_name,save,alpha,inner_product_type,n_split,scaling,span_c):
 
-	if scaling: #note that this scaling treats element a of each block the same, which may not be the best way to do this, but its worth trying
-		x_scaler = StandardScaler()
-		y_scaler = StandardScaler()
-		sad_super = x_scaler.fit_transform(sad_super)
-		scf_super = y_scaler.fit_transform(scf_super)
 
-	cutoff_ntnb = train_size*n_split
-	X_train=sad_super[:cutoff_ntnb]
-	X_test=sad_super[cutoff_ntnb:]
-	y_train=scf_super[:cutoff_ntnb]
-	y_test=scf_super[cutoff_ntnb:]
 
-	#where the magic happens
-	predicted = blocked_krr(X_train,X_test,y_train,alpha,inner_product_type,span_c)
-	predict_train = blocked_krr(X_train,X_train,y_train,alpha,inner_product_type,span_c)
-	# predicted = elementwise_blocked_krr(X_train,X_test,y_train,alpha,inner_product_type,n_split)
-	# predict_train = elementwise_blocked_krr(X_train,X_train,y_train,alpha,inner_product_type,n_split)
-	
-	if scaling:
-		y_train = y_scaler.inverse_transform(y_train)
-		predicted = y_scaler.inverse_transform(predicted)
-		y_test = y_scaler.inverse_transform(y_test)
-		predict_train = y_scaler.inverse_transform(predict_train)
-
-	mae_train, mae_test = find_mae(y_train,predicted,y_test,predict_train,train_size)	
-
-	if save:
-		name=dir_name+"/predicted_converged_focks_train_"+str(train_size)+".npy"
-		np.save(name,predicted)
-
-	return predicted
-
-def find_mae(y_train,predicted,y_test,predict_train,train_size):
-
-	
-	abs_diff_train=np.abs(predict_train-y_train)
-	mae_train=np.mean(abs_diff_train)
-	print("Train MAE matrix elements w/ train size",train_size,":",round_2_sigfigs(mae_train,3))
-
-	abs_diff_test=np.abs(predicted-y_test)
-	mae_test=np.mean(abs_diff_test)
-	print("Test MAE matrix elements w/ train size",train_size,":",round_2_sigfigs(mae_test,3))
-
-	return mae_train, mae_test
 
 if __name__ == "__main__":
 	main()
